@@ -25,11 +25,17 @@
 </style>
 </head>
 <body>
-<h1>Marcar Reunião de Alinhamento</h1>
+<h1>Marcar reunião</h1>
 <div id="estado" class="msg info">Abrindo a conversa…</div>
 
 <form id="f" class="hid" autocomplete="off">
-  <label>Nome do lead</label>
+  <label>Tipo de reunião</label>
+  <select id="tipo">
+    <option value="A">Alinhamento (lead novo · online)</option>
+    <option value="O">Operacional (cliente · jurídico)</option>
+    <option value="P">Presencial (lead no escritório)</option>
+  </select>
+  <label>Nome</label>
   <input id="nome" required>
   <div class="row">
     <div><label>Telefone</label><input id="tel" inputmode="tel"></div>
@@ -42,7 +48,7 @@
   <label>Tema (opcional)</label>
   <input id="tema" placeholder="ex.: pensão, divórcio…">
   <button id="btn" type="submit">Marcar e enviar convite</button>
-  <small>Cria o evento na agenda do Daniel com Meet e convida o lead e o comercial@. O card vai para "Reunião Agendada".</small>
+  <small>Alinhamento e Presencial: convida o lead e o comercial@ e o card vai para "Reunião Agendada". Operacional: convida só o cliente e avisa o jurídico no Discord. Presencial não gera Meet.</small>
 </form>
 
 <div id="resultado" class="hid">
@@ -111,26 +117,30 @@
     ev.preventDefault();
     var slot = $('hora').value; if (!slot) { estado('Escolha um horário.', 'erro'); return; }
     var btn = $('btn'); btn.disabled = true; btn.textContent = 'Marcando…'; $('estado').classList.add('hid');
-    chamar({ action: 'plugin_book', slotISO: slot, name: $('nome').value.trim(), phone: $('tel').value.trim(), email: $('email').value.trim(),
+    chamar({ action: 'plugin_book', tipo: $('tipo').value, slotISO: slot, name: $('nome').value.trim(), phone: $('tel').value.trim(), email: $('email').value.trim(),
              tema: $('tema').value.trim(), contactId: ctx.contactId, conversationId: ctx.conversationId, operatorName: ctx.operatorName })
     .then(function (r) {
       btn.disabled = false; btn.textContent = 'Marcar e enviar convite';
       if (!r.ok) { estado(r.error || 'não marcou', 'erro'); toast(r.error || 'Não marcou', 'error'); return; }
       $('f').classList.add('hid'); $('resultado').classList.remove('hid');
-      $('okmsg').textContent = 'Marcada: ' + r.label + '. Convite enviado para ' + $('email').value.trim() + '.';
-      $('meetlink').textContent = r.meetLink || r.htmlLink; $('meetlink').href = r.meetLink || r.htmlLink;
-      var card = r.card || {}; $('cardmsg').textContent = card.movido ? '✅ Card: ' + card.motivo : '⚠️ Card não movido: ' + (card.motivo || '') + ' — mova para "Reunião Agendada" à mão.';
-      window._ultima = { label: r.label, meet: r.meetLink, nome: $('nome').value.trim() };
-      toast('Reunião marcada: ' + r.label);
+      $('okmsg').textContent = (r.rotulo || 'Reunião') + ' marcada: ' + r.label + '. Convite enviado para ' + $('email').value.trim() + '.';
+      $('meetlink').textContent = r.presencial ? 'Presencial no escritório (sem Meet)' : (r.meetLink || r.htmlLink); $('meetlink').href = r.meetLink || r.htmlLink;
+      var card = r.card || {};
+      $('cardmsg').textContent = card.naoAplica ? 'ℹ️ Reunião de cliente: o card do CRM não muda.' : (card.movido ? '✅ Card: ' + card.motivo : '⚠️ Card não movido: ' + (card.motivo || '') + ' — mova para "Reunião Agendada" à mão.');
+      window._ultima = { label: r.label, meet: r.meetLink, nome: $('nome').value.trim(), rotulo: r.rotulo || 'Reunião', presencial: !!r.presencial };
+      toast((r.rotulo || 'Reunião') + ' marcada: ' + r.label);
     }).catch(function (e) { btn.disabled = false; btn.textContent = 'Marcar e enviar convite'; estado('Falha: ' + e, 'erro'); });
   });
 
   $('copiar').addEventListener('click', function () {
     var u = window._ultima || {};
     var primeiro = (u.nome || '').split(' ')[0];
-    var txt = 'Perfeito, ' + primeiro + '! Sua Reunião de Alinhamento ficou marcada para ' + u.label + ' (horário de Brasília). ' +
-              'O convite com o link do Google Meet foi enviado para o seu e-mail' + (u.meet ? '. Link direto: ' + u.meet : '.') +
-              ' Qualquer imprevisto, é só me avisar por aqui.';
+    var txt = u.presencial
+      ? 'Perfeito, ' + primeiro + '! Sua ' + u.rotulo + ' ficou marcada para ' + u.label + ' (horário de Brasília), no nosso escritório em Belo Horizonte. ' +
+        'O convite foi enviado para o seu e-mail. Qualquer imprevisto, é só me avisar por aqui.'
+      : 'Perfeito, ' + primeiro + '! Sua ' + u.rotulo + ' ficou marcada para ' + u.label + ' (horário de Brasília). ' +
+        'O convite com o link do Google Meet foi enviado para o seu e-mail' + (u.meet ? '. Link direto: ' + u.meet : '.') +
+        ' Qualquer imprevisto, é só me avisar por aqui.';
     navigator.clipboard.writeText(txt).then(function () { toast('Mensagem copiada — cole na conversa'); }, function () { prompt('Copie a mensagem:', txt); });
   });
   $('outra').addEventListener('click', function () { $('resultado').classList.add('hid'); $('f').classList.remove('hid'); });

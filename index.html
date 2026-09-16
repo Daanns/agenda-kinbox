@@ -55,7 +55,7 @@
 
 <script>
   // ---- ligação com o braço (Apps Script). Sem segredo aqui: o braço valida o token de sessão do Kinbox.
-  var BRACO = '__BRACO_URL__';
+  var BRACO = 'https://script.google.com/macros/s/AKfycbyYEbpeUwjgVFIP1n10h2-NzCjC2NRNEJKoQkjIMHk0XysuNtTHqAbuleevaaLwXHtXxg/exec';
 
   var q = new URLSearchParams(location.search);
   var ctx = { token: q.get('token') || '', operator_id: q.get('operator_id') || '', auth_secret: q.get('auth_secret') || '',
@@ -88,7 +88,7 @@
 
   function carregarDias() {
     $('dia').innerHTML = '<option>carregando…</option>';
-    chamar({ action: 'slots' }).then(function (r) {
+    chamar({ action: 'plugin_slots' }).then(function (r) {
       if (!r.ok) { estado(r.error || 'erro ao ler a agenda', 'erro'); return; }
       $('dia').innerHTML = r.days.map(function (d) { return '<option value="' + d.date + '">' + d.label + '</option>'; }).join('');
       slotsCache[r.date] = r.slots; renderHoras(r.slots);
@@ -104,14 +104,14 @@
     var date = this.value;
     if (slotsCache[date]) { renderHoras(slotsCache[date]); return; }
     $('hora').innerHTML = '<option>carregando…</option>';
-    chamar({ action: 'slots', date: date }).then(function (r) { if (r.ok) { slotsCache[date] = r.slots; renderHoras(r.slots); } });
+    chamar({ action: 'plugin_slots', date: date }).then(function (r) { if (r.ok) { slotsCache[date] = r.slots; renderHoras(r.slots); } });
   });
 
   $('f').addEventListener('submit', function (ev) {
     ev.preventDefault();
     var slot = $('hora').value; if (!slot) { estado('Escolha um horário.', 'erro'); return; }
     var btn = $('btn'); btn.disabled = true; btn.textContent = 'Marcando…'; $('estado').classList.add('hid');
-    chamar({ action: 'book', slotISO: slot, name: $('nome').value.trim(), phone: $('tel').value.trim(), email: $('email').value.trim(),
+    chamar({ action: 'plugin_book', slotISO: slot, name: $('nome').value.trim(), phone: $('tel').value.trim(), email: $('email').value.trim(),
              tema: $('tema').value.trim(), contactId: ctx.contactId, conversationId: ctx.conversationId, operatorName: ctx.operatorName })
     .then(function (r) {
       btn.disabled = false; btn.textContent = 'Marcar e enviar convite';

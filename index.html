@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Marcar reunião</title>
+<style>
+  :root{--azul:#12314F;--cinza:#5b6b7b;--borda:#dfe4ea;--ok:#0a7d3b;--erro:#b91c1c;--fundo:#fff}
+  *{box-sizing:border-box}
+  body{font:13px/1.45 system-ui,Segoe UI,Arial;margin:0;padding:10px;color:var(--azul);background:var(--fundo)}
+  h1{font-size:14px;margin:0 0 8px}
+  label{display:block;font-size:11px;color:var(--cinza);margin:8px 0 2px}
+  input,select,textarea{width:100%;font:inherit;padding:6px 8px;border:1px solid var(--borda);border-radius:6px;background:#fff;color:var(--azul)}
+  input:focus,select:focus,textarea:focus{outline:2px solid #bcd0ea;border-color:var(--azul)}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  button{font:inherit;font-weight:600;width:100%;padding:8px 10px;border:1px solid var(--azul);background:var(--azul);color:#fff;border-radius:6px;cursor:pointer;margin-top:10px}
+  button.sec{background:#fff;color:var(--azul)}
+  button:disabled{opacity:.55;cursor:default}
+  .msg{margin-top:8px;padding:8px;border-radius:6px;font-size:12px}
+  .msg.ok{background:#e8f5ec;color:var(--ok)} .msg.erro{background:#fbe9e9;color:var(--erro)} .msg.info{background:#f1f4f8;color:var(--cinza)}
+  .meet{word-break:break-all}
+  small{color:var(--cinza)}
+  #copiar{margin-top:6px}
+  .hid{display:none}
+</style>
+</head>
+<body>
+<h1>Marcar Reunião de Alinhamento</h1>
+<div id="estado" class="msg info">Abrindo a conversa…</div>
+
+<form id="f" class="hid" autocomplete="off">
+  <label>Nome do lead</label>
+  <input id="nome" required>
+  <div class="row">
+    <div><label>Telefone</label><input id="tel" inputmode="tel"></div>
+    <div><label>E-mail <b style="color:#b91c1c">*</b></label><input id="email" type="email" required placeholder="convite vai por e-mail"></div>
+  </div>
+  <div class="row">
+    <div><label>Dia</label><select id="dia"></select></div>
+    <div><label>Horário</label><select id="hora"></select></div>
+  </div>
+  <label>Tema (opcional)</label>
+  <input id="tema" placeholder="ex.: pensão, divórcio…">
+  <button id="btn" type="submit">Marcar e enviar convite</button>
+  <small>Cria o evento na agenda do Daniel com Meet e convida o lead e o comercial@. O card vai para "Reunião Agendada".</small>
+</form>
+
+<div id="resultado" class="hid">
+  <div class="msg ok" id="okmsg"></div>
+  <div class="meet"><a id="meetlink" target="_blank" rel="noopener"></a></div>
+  <button id="copiar" class="sec" type="button">Copiar mensagem para o lead</button>
+  <button id="outra" class="sec" type="button">Marcar outra</button>
+  <div id="cardmsg" class="msg info"></div>
+</div>
+
+<script>
+  // ---- ligação com o braço (Apps Script). Sem segredo aqui: o braço valida o token de sessão do Kinbox.
+  var BRACO = '__BRACO_URL__';
+
+  var q = new URLSearchParams(location.search);
+  var ctx = { token: q.get('token') || '', operator_id: q.get('operator_id') || '', auth_secret: q.get('auth_secret') || '',
+              contactId: '', conversationId: '', sessionId: '', operatorName: '' };
+  var slotsCache = {};
+
+  var $ = function (id) { return document.getElementById(id); };
+  function estado(txt, cls) { var e = $('estado'); e.textContent = txt; e.className = 'msg ' + (cls || 'info'); e.classList.remove('hid'); }
+  function toast(msg, type) { try { window.parent.postMessage({ event: 'toast', data: { type: type || 'success', message: msg } }, '*'); } catch (_) {} }
+
+  // Kinbox → página: evento "conversation" traz contato e conversa
+  window.addEventListener('message', function (ev) {
+    var d = ev.data || {}; if (!d.event) return;
+    if (d.event === 'conversation') {
+      var c = (d.data && d.data.contact) || {}, conv = (d.data && d.data.conversation) || {}, s = (d.data && d.data.session) || {}, u = (d.data && d.data.user) || {};
+      ctx.contactId = c.id || ''; ctx.conversationId = conv.id || ''; ctx.sessionId = s.id || ''; ctx.operatorName = u.name || '';
+      if (!$('nome').value) $('nome').value = c.name || '';
+      if (!$('tel').value) $('tel').value = c.phone || '';
+      if (!$('email').value && c.email && /@/.test(c.email)) $('email').value = c.email;
+      $('f').classList.remove('hid'); $('estado').classList.add('hid');
+      if (!$('dia').options.length) carregarDias();
+    }
+    if (d.event === 'no_conversation') estado('Abra uma conversa para marcar a reunião.', 'info');
+  });
+
+  function chamar(payload) {
+    payload.token = ctx.token; payload.operator_id = ctx.operator_id; payload.auth_secret = ctx.auth_secret;
+    return fetch(BRACO, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
+  }
+
+  function carregarDias() {
+    $('dia').innerHTML = '<option>carregando…</option>';
+    chamar({ action: 'slots' }).then(function (r) {
+      if (!r.ok) { estado(r.error || 'erro ao ler a agenda', 'erro'); return; }
+      $('dia').innerHTML = r.days.map(function (d) { return '<option value="' + d.date + '">' + d.label + '</option>'; }).join('');
+      slotsCache[r.date] = r.slots; renderHoras(r.slots);
+    }).catch(function (e) { estado('Sem resposta do braço da agenda: ' + e, 'erro'); });
+  }
+  function renderHoras(slots) {
+    if (!slots.length) { $('hora').innerHTML = '<option value="">sem horário neste dia</option>'; return; }
+    $('hora').innerHTML = slots.map(function (s) {
+      return '<option value="' + s.iso + '">' + s.label + (s.ocupado ? ' · já tem ' + s.ocupado : '') + '</option>';
+    }).join('');
+  }
+  $('dia').addEventListener('change', function () {
+    var date = this.value;
+    if (slotsCache[date]) { renderHoras(slotsCache[date]); return; }
+    $('hora').innerHTML = '<option>carregando…</option>';
+    chamar({ action: 'slots', date: date }).then(function (r) { if (r.ok) { slotsCache[date] = r.slots; renderHoras(r.slots); } });
+  });
+
+  $('f').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var slot = $('hora').value; if (!slot) { estado('Escolha um horário.', 'erro'); return; }
+    var btn = $('btn'); btn.disabled = true; btn.textContent = 'Marcando…'; $('estado').classList.add('hid');
+    chamar({ action: 'book', slotISO: slot, name: $('nome').value.trim(), phone: $('tel').value.trim(), email: $('email').value.trim(),
+             tema: $('tema').value.trim(), contactId: ctx.contactId, conversationId: ctx.conversationId, operatorName: ctx.operatorName })
+    .then(function (r) {
+      btn.disabled = false; btn.textContent = 'Marcar e enviar convite';
+      if (!r.ok) { estado(r.error || 'não marcou', 'erro'); toast(r.error || 'Não marcou', 'error'); return; }
+      $('f').classList.add('hid'); $('resultado').classList.remove('hid');
+      $('okmsg').textContent = 'Marcada: ' + r.label + '. Convite enviado para ' + $('email').value.trim() + '.';
+      $('meetlink').textContent = r.meetLink || r.htmlLink; $('meetlink').href = r.meetLink || r.htmlLink;
+      var card = r.card || {}; $('cardmsg').textContent = card.movido ? '✅ Card: ' + card.motivo : '⚠️ Card não movido: ' + (card.motivo || '') + ' — mova para "Reunião Agendada" à mão.';
+      window._ultima = { label: r.label, meet: r.meetLink, nome: $('nome').value.trim() };
+      toast('Reunião marcada: ' + r.label);
+    }).catch(function (e) { btn.disabled = false; btn.textContent = 'Marcar e enviar convite'; estado('Falha: ' + e, 'erro'); });
+  });
+
+  $('copiar').addEventListener('click', function () {
+    var u = window._ultima || {};
+    var primeiro = (u.nome || '').split(' ')[0];
+    var txt = 'Perfeito, ' + primeiro + '! Sua Reunião de Alinhamento ficou marcada para ' + u.label + ' (horário de Brasília). ' +
+              'O convite com o link do Google Meet foi enviado para o seu e-mail' + (u.meet ? '. Link direto: ' + u.meet : '.') +
+              ' Qualquer imprevisto, é só me avisar por aqui.';
+    navigator.clipboard.writeText(txt).then(function () { toast('Mensagem copiada — cole na conversa'); }, function () { prompt('Copie a mensagem:', txt); });
+  });
+  $('outra').addEventListener('click', function () { $('resultado').classList.add('hid'); $('f').classList.remove('hid'); });
+
+  if (!ctx.token) estado('Esta tela só funciona dentro do Kinbox (plugin da conversa).', 'erro');
+</script>
+</body>
+</html>

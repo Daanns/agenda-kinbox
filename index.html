@@ -48,7 +48,7 @@
   <label>Tema (opcional)</label>
   <input id="tema" placeholder="ex.: pensão, divórcio…">
   <button id="btn" type="submit">Marcar e enviar convite</button>
-  <small>Todos os tipos convidam o lead, o daniel@ e o comercial@. Alinhamento e Presencial: o card vai para "Reunião Agendada". Operacional: avisa o jurídico no Discord. Presencial não gera Meet.</small>
+  <small>Todos os tipos convidam o lead, o daniel@ e o comercial@. Alinhamento e Presencial: o card vai para "Reunião Agendada". Operacional: avisa o jurídico no Discord. Presencial não gera Meet. Lembretes automáticos na conversa: véspera (se marcada com +48h), 8h30 do dia e link 10 min antes.</small>
 </form>
 
 <div id="resultado" class="hid">
@@ -57,6 +57,7 @@
   <button id="copiar" class="sec" type="button">Copiar mensagem para o lead</button>
   <button id="outra" class="sec" type="button">Marcar outra</button>
   <div id="cardmsg" class="msg info"></div>
+  <div id="lembmsg" class="msg info"></div>
 </div>
 
 <script>
@@ -127,6 +128,10 @@
       $('meetlink').textContent = r.presencial ? 'Presencial no escritório (sem Meet)' : (r.meetLink || r.htmlLink); $('meetlink').href = r.meetLink || r.htmlLink;
       var card = r.card || {};
       $('cardmsg').textContent = card.naoAplica ? 'ℹ️ Reunião de cliente: o card do CRM não muda.' : (card.movido ? '✅ Card: ' + card.motivo : '⚠️ Card não movido: ' + (card.motivo || '') + ' — mova para "Reunião Agendada" à mão.');
+      var lb = r.lembretes || { agendados: [], pulados: [], erros: [] };
+      $('lembmsg').textContent = (lb.agendados.length ? '⏰ Lembretes agendados na conversa: ' + lb.agendados.join(' · ') + '.' : '⚠️ Nenhum lembrete agendado.') +
+        (lb.erros.length ? ' ⚠️ Falhou: ' + lb.erros.join(' · ') + ' — agende à mão pelo menu "... › Agendar mensagem".' : '') +
+        (lb.pulados.length ? ' (Pulados por já ter passado: ' + lb.pulados.join(', ') + '.)' : '');
       window._ultima = { label: r.label, meet: r.meetLink, nome: $('nome').value.trim(), rotulo: r.rotulo || 'Reunião', presencial: !!r.presencial };
       toast((r.rotulo || 'Reunião') + ' marcada: ' + r.label);
     }).catch(function (e) { btn.disabled = false; btn.textContent = 'Marcar e enviar convite'; estado('Falha: ' + e, 'erro'); });

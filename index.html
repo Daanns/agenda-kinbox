@@ -93,18 +93,39 @@
     return fetch(BRACO, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
   }
 
-  function carregarDias() {
-    $('dia').innerHTML = '<option>carregando…</option>';
-    chamar({ action: 'plugin_slots' }).then(function (r) {
-      if (!r.ok) { estado(r.error || 'erro ao ler a agenda', 'erro'); return; }
-      $('dia').innerHTML = r.days.map(function (d) { return '<option value="' + d.date + '">' + d.label + '</option>'; }).join('');
-      slotsCache[r.date] = r.slots; renderHoras(r.slots);
-    }).catch(function (e) { estado('Sem resposta do braço da agenda: ' + e, 'erro'); });
+  // v1.5 25/09 — velocidade: (1) a agenda é pedida assim que a tela abre, sem esperar o Kinbox mandar o contato;
+  // (2) a resposta traz os horários de TODOS os dias (porDia) → trocar de dia é instantâneo;
+  // (3) a última agenda lida fica guardada e aparece na hora (marcada "atualizando…") até a nova chegar.
+  var KEY = 'agenda-kinbox-slots';
+  var pedido = null;
+  function lerGuardado() { try { var g = JSON.parse(localStorage.getItem(KEY) || 'null'); return g && (Date.now() - g.t < 6 * 3600000) ? g.r : null; } catch (_) { return null; } }
+  function guardar(r) { try { localStorage.setItem(KEY, JSON.stringify({ t: Date.now(), r: r })); } catch (_) {} }
+  function preBuscar() { if (!pedido && ctx.token) pedido = chamar({ action: 'plugin_slots' }); return pedido; }
+  function aplicar(r, velho) {
+    var agora = Date.now(), hoje = new Date(agora - 3 * 3600000).toISOString().slice(0, 10); // data em Brasília
+    var dias = r.days.filter(function (d) { return d.date >= hoje; });
+    var atual = $('dia').value;
+    $('dia').innerHTML = dias.map(function (d) { return '<option value="' + d.date + '">' + d.label + '</option>'; }).join('');
+    if (atual && dias.some(function (d) { return d.date === atual; })) $('dia').value = atual;
+    slotsCache = {};
+    if (r.porDia) Object.keys(r.porDia).forEach(function (k) { slotsCache[k] = r.porDia[k].filter(function (s) { return Date.parse(s.iso) > agora; }); });
+    else slotsCache[r.date] = r.slots;
+    var sel = $('dia').value, horaAtual = $('hora').value;
+    renderHoras(slotsCache[sel] || [], velho);
+    if (horaAtual) $('hora').value = horaAtual;
   }
-  function renderHoras(slots) {
+  function carregarDias() {
+    var g = lerGuardado();
+    if (g) aplicar(g, true); else $('dia').innerHTML = '<option>carregando…</option>';
+    preBuscar().then(function (r) {
+      if (!r.ok) { pedido = null; estado(r.error || 'erro ao ler a agenda', 'erro'); return; }
+      aplicar(r, false); guardar(r);
+    }).catch(function (e) { pedido = null; estado('Sem resposta do braço da agenda: ' + e, 'erro'); });
+  }
+  function renderHoras(slots, velho) {
     if (!slots.length) { $('hora').innerHTML = '<option value="">sem horário neste dia</option>'; return; }
     $('hora').innerHTML = slots.map(function (s) {
-      return '<option value="' + s.iso + '">' + s.label + (s.ocupado ? ' · já tem ' + s.ocupado : '') + '</option>';
+      return '<option value="' + s.iso + '">' + s.label + (s.ocupado ? ' · já tem ' + s.ocupado : '') + (velho ? ' (atualizando…)' : '') + '</option>';
     }).join('');
   }
   $('dia').addEventListener('change', function () {
@@ -134,6 +155,7 @@
         (lb.pulados.length ? ' (Pulados por já ter passado: ' + lb.pulados.join(', ') + '.)' : '');
       window._ultima = { label: r.label, meet: r.meetLink, nome: $('nome').value.trim(), rotulo: r.rotulo || 'Reunião', presencial: !!r.presencial };
       toast((r.rotulo || 'Reunião') + ' marcada: ' + r.label);
+      pedido = null; carregarDias(); // v1.5: o "já tem N" passa a contar esta marcação
     }).catch(function (e) { btn.disabled = false; btn.textContent = 'Marcar e enviar convite'; estado('Falha: ' + e, 'erro'); });
   });
 
@@ -151,6 +173,7 @@
   $('outra').addEventListener('click', function () { $('resultado').classList.add('hid'); $('f').classList.remove('hid'); });
 
   if (!ctx.token) estado('Esta tela só funciona dentro do Kinbox (plugin da conversa).', 'erro');
+  else preBuscar(); // v1.5: já pede a agenda enquanto o Kinbox manda o contato
 </script>
 </body>
 </html>

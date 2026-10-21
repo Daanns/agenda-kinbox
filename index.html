@@ -39,7 +39,7 @@
   <input id="nome" required>
   <div class="row">
     <div><label>Telefone</label><input id="tel" inputmode="tel"></div>
-    <div><label>E-mail <b style="color:#b91c1c">*</b></label><input id="email" type="email" required placeholder="convite vai por e-mail"></div>
+    <div><label>E-mail <b id="emailobrig" style="color:#b91c1c">*</b></label><input id="email" type="email" required placeholder="convite vai por e-mail"></div>
   </div>
   <div class="row">
     <div><label>Dia</label><select id="dia"></select></div>
@@ -47,7 +47,10 @@
   </div>
   <label>Tema (opcional)</label>
   <input id="tema" placeholder="ex.: pensão, divórcio…">
-  <button id="btn" type="submit">Marcar e enviar convite</button>
+  <div id="grupomsg" class="msg info hid">Conversa de GRUPO: o telefone do grupo não é gravado e os lembretes saem sem nome ("Oi!"). Confira o nome de quem vai à reunião.</div>
+  <div id="confere" class="msg info hid"></div>
+  <button id="btn" type="submit">Conferir e marcar</button>
+  <button id="voltar" class="sec hid" type="button">Voltar e mudar</button>
   <small>Todos os tipos convidam o lead, o daniel@ e o comercial@. Alinhamento e Presencial: o card vai para "Reunião Agendada". Operacional: avisa o jurídico no Discord. Presencial não gera Meet. Lembretes automáticos na conversa (3 toques): outro dia → véspera 17h, 8h30 do dia e link 10 min antes; mesmo dia → resumo logo após marcar, 2h antes e link 10 min antes; presencial → 1h antes com o endereço no lugar do link.</small>
 </form>
 
@@ -66,21 +69,38 @@
 
   var q = new URLSearchParams(location.search);
   var ctx = { token: q.get('token') || '', operator_id: q.get('operator_id') || '', auth_secret: q.get('auth_secret') || '',
-              contactId: '', conversationId: '', sessionId: '', operatorName: '' };
+              contactId: '', conversationId: '', sessionId: '', operatorName: '', grupo: false };
   var slotsCache = {};
 
   var $ = function (id) { return document.getElementById(id); };
   function estado(txt, cls) { var e = $('estado'); e.textContent = txt; e.className = 'msg ' + (cls || 'info'); e.classList.remove('hid'); }
   function toast(msg, type) { try { window.parent.postMessage({ event: 'toast', data: { type: type || 'success', message: msg } }, '*'); } catch (_) {} }
 
+  // v1.6 21/10 — conversa de GRUPO: o "telefone" é o id do grupo (18+ dígitos, "5531…-1600…" ou "@g.us") e o nome é o do grupo
+  function ehGrupo(c, conv) {
+    if (c.isGroup === true || conv.isGroup === true || /group/i.test(String(conv.type || c.type || ''))) return true;
+    var bruto = String(c.phone || ''); if (/@g\.us|\d{10,}-\d{6,}/.test(bruto)) return true;   // "-" só no formato antigo de grupo
+    var dg = bruto.replace(/\D/g, ''); if (/^55\d{10,11}$/.test(dg)) dg = dg.slice(2);
+    return dg.length > 11;
+  }
+  // v1.6 21/10 — trocou de conversa: ZERA o formulário (antes o nome/telefone/e-mail do lead anterior ficavam e iam para o novo)
+  function zerar() {
+    ['nome', 'tel', 'email', 'tema'].forEach(function (id) { $(id).value = ''; });
+    $('tipo').value = 'A'; ajustarEmail(); desconferir();
+    $('resultado').classList.add('hid'); $('f').classList.remove('hid');
+  }
   // Kinbox → página: evento "conversation" traz contato e conversa
   window.addEventListener('message', function (ev) {
     var d = ev.data || {}; if (!d.event) return;
     if (d.event === 'conversation') {
       var c = (d.data && d.data.contact) || {}, conv = (d.data && d.data.conversation) || {}, s = (d.data && d.data.session) || {}, u = (d.data && d.data.user) || {};
+      var novaConv = String(conv.id || '') !== String(ctx.conversationId || '');
+      if (novaConv) zerar();
       ctx.contactId = c.id || ''; ctx.conversationId = conv.id || ''; ctx.sessionId = s.id || ''; ctx.operatorName = u.name || '';
+      ctx.grupo = ehGrupo(c, conv);
+      $('grupomsg').classList.toggle('hid', !ctx.grupo);
       if (!$('nome').value) $('nome').value = c.name || '';
-      if (!$('tel').value) $('tel').value = c.phone || '';
+      if (!$('tel').value && !ctx.grupo) $('tel').value = c.phone || '';   // grupo: não traz o id do grupo como telefone
       if (!$('email').value && c.email && /@/.test(c.email)) $('email').value = c.email;
       $('f').classList.remove('hid'); $('estado').classList.add('hid');
       if (!$('dia').options.length) carregarDias();
@@ -101,11 +121,27 @@
   function lerGuardado() { try { var g = JSON.parse(localStorage.getItem(KEY) || 'null'); return g && (Date.now() - g.t < 6 * 3600000) ? g.r : null; } catch (_) { return null; } }
   function guardar(r) { try { localStorage.setItem(KEY, JSON.stringify({ t: Date.now(), r: r })); } catch (_) {} }
   function preBuscar() { if (!pedido && ctx.token) pedido = chamar({ action: 'plugin_slots' }); return pedido; }
+  // v1.6 21/10 — o seletor diz HOJE / AMANHÃ e, antes de gravar, a tela mostra a data POR EXTENSO para conferir
+  // (20/10 o plugin marcou 28/10 em vez de 21/10: a "quarta" errada no seletor, sem nada que avisasse)
+  function diaBRT(ms) { return new Date(ms - 3 * 3600000).toISOString().slice(0, 10); }
+  function relativo(date) {
+    var hoje = diaBRT(Date.now()), amanha = diaBRT(Date.now() + 86400000);
+    if (date === hoje) return 'HOJE'; if (date === amanha) return 'AMANHÃ';
+    var n = Math.round((Date.parse(date + 'T12:00:00-03:00') - Date.parse(hoje + 'T12:00:00-03:00')) / 86400000);
+    return n > 0 ? 'daqui a ' + n + ' dias' : '';
+  }
+  function extenso(date) {
+    try { return new Date(date + 'T12:00:00-03:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Sao_Paulo' }); }
+    catch (_) { return date.split('-').reverse().join('/'); }
+  }
   function aplicar(r, velho) {
-    var agora = Date.now(), hoje = new Date(agora - 3 * 3600000).toISOString().slice(0, 10); // data em Brasília
+    var agora = Date.now(), hoje = diaBRT(agora); // data em Brasília
     var dias = r.days.filter(function (d) { return d.date >= hoje; });
     var atual = $('dia').value;
-    $('dia').innerHTML = dias.map(function (d) { return '<option value="' + d.date + '">' + d.label + '</option>'; }).join('');
+    $('dia').innerHTML = dias.map(function (d) {
+      var rel = relativo(d.date);
+      return '<option value="' + d.date + '">' + (rel === 'HOJE' || rel === 'AMANHÃ' ? rel + ' · ' : '') + d.label + '</option>';
+    }).join('');
     if (atual && dias.some(function (d) { return d.date === atual; })) $('dia').value = atual;
     slotsCache = {};
     if (r.porDia) Object.keys(r.porDia).forEach(function (k) { slotsCache[k] = r.porDia[k].filter(function (s) { return Date.parse(s.iso) > agora; }); });
@@ -128,6 +164,24 @@
       return '<option value="' + s.iso + '">' + s.label + (s.ocupado ? ' · já tem ' + s.ocupado : '') + (velho ? ' (atualizando…)' : '') + '</option>';
     }).join('');
   }
+  // v1.6 21/10 — e-mail obrigatório só onde há convite com Meet (Alinhamento e Operacional); no Presencial é opcional
+  function ajustarEmail() {
+    var p = $('tipo').value === 'P';
+    $('email').required = !p; $('emailobrig').classList.toggle('hid', p);
+    $('email').placeholder = p ? 'opcional no presencial' : 'convite vai por e-mail';
+  }
+  var conferido = false;
+  function desconferir() {
+    conferido = false; $('confere').classList.add('hid'); $('voltar').classList.add('hid');
+    var btn = $('btn'); btn.disabled = false; btn.textContent = 'Conferir e marcar';
+  }
+  ['tipo', 'nome', 'tel', 'email', 'dia', 'hora', 'tema'].forEach(function (id) {
+    $(id).addEventListener('change', desconferir); $(id).addEventListener('input', desconferir);
+  });
+  $('tipo').addEventListener('change', ajustarEmail);
+  $('voltar').addEventListener('click', desconferir);
+  ajustarEmail();
+
   $('dia').addEventListener('change', function () {
     var date = this.value;
     if (slotsCache[date]) { renderHoras(slotsCache[date]); return; }
@@ -137,15 +191,33 @@
 
   $('f').addEventListener('submit', function (ev) {
     ev.preventDefault();
-    var slot = $('hora').value; if (!slot) { estado('Escolha um horário.', 'erro'); return; }
-    var btn = $('btn'); btn.disabled = true; btn.textContent = 'Marcando…'; $('estado').classList.add('hid');
+    var slot = $('hora').value; if (!slot || isNaN(Date.parse(slot))) { estado('Escolha um horário (a lista ainda pode estar carregando).', 'erro'); return; }
+    var btn = $('btn');
+    // 1º toque: CONFERIR (data por extenso + hoje/amanhã); só o 2º toque grava
+    if (!conferido) {
+      // revisor 21/10: a data e a hora conferidas saem do PRÓPRIO horário escolhido (slotISO), não do campo "dia"
+      var date = diaBRT(Date.parse(slot)), rel = relativo(date);
+      var hhmm = new Date(Date.parse(slot) - 3 * 3600000).toISOString().slice(11, 16);
+      var email = $('email').value.trim();
+      $('confere').innerHTML = '';
+      var linhas = [
+        'Confira antes de marcar:',
+        $('tipo').options[$('tipo').selectedIndex].textContent.split(' (')[0] + ' com ' + ($('nome').value.trim() || '(sem nome)'),
+        extenso(date) + (rel ? ' (' + rel + ')' : '') + ', às ' + hhmm + ' (Brasília)',
+        email ? 'Convite para ' + email : 'Sem e-mail (presencial): ninguém recebe convite além do escritório'
+      ];
+      linhas.forEach(function (t, i) { var el = document.createElement(i === 2 ? 'b' : 'div'); el.textContent = t; $('confere').appendChild(el); if (i === 2) $('confere').appendChild(document.createElement('br')); });
+      $('confere').classList.remove('hid'); $('voltar').classList.remove('hid');
+      conferido = true; btn.textContent = 'Confirmar e marcar'; return;
+    }
+    btn.disabled = true; btn.textContent = 'Marcando…'; $('estado').classList.add('hid');
     chamar({ action: 'plugin_book', tipo: $('tipo').value, slotISO: slot, name: $('nome').value.trim(), phone: $('tel').value.trim(), email: $('email').value.trim(),
-             tema: $('tema').value.trim(), contactId: ctx.contactId, conversationId: ctx.conversationId, operatorName: ctx.operatorName })
+             tema: $('tema').value.trim(), contactId: ctx.contactId, conversationId: ctx.conversationId, operatorName: ctx.operatorName, isGroup: !!ctx.grupo })
     .then(function (r) {
-      btn.disabled = false; btn.textContent = 'Marcar e enviar convite';
+      desconferir();
       if (!r.ok) { estado(r.error || 'não marcou', 'erro'); toast(r.error || 'Não marcou', 'error'); return; }
       $('f').classList.add('hid'); $('resultado').classList.remove('hid');
-      $('okmsg').textContent = (r.rotulo || 'Reunião') + ' marcada: ' + r.label + '. Convite enviado para ' + $('email').value.trim() + '.';
+      $('okmsg').textContent = (r.rotulo || 'Reunião') + ' marcada: ' + r.label + '.' + (r.email ? ' Convite enviado para ' + r.email + '.' : ' Sem e-mail do lead: convite só para o escritório.');
       $('meetlink').textContent = r.presencial ? 'Presencial no escritório (sem Meet)' : (r.meetLink || r.htmlLink); $('meetlink').href = r.meetLink || r.htmlLink;
       var card = r.card || {};
       $('cardmsg').textContent = card.naoAplica ? 'ℹ️ Reunião de cliente: o card do CRM não muda.' : (card.movido ? '✅ Card: ' + card.motivo : '⚠️ Card não movido: ' + (card.motivo || '') + ' — mova para "Reunião Agendada" à mão.');
@@ -153,19 +225,20 @@
       $('lembmsg').textContent = (lb.agendados.length ? '⏰ Lembretes agendados na conversa: ' + lb.agendados.join(' · ') + '.' : '⚠️ Nenhum lembrete agendado.') +
         (lb.erros.length ? ' ⚠️ Falhou: ' + lb.erros.join(' · ') + ' — agende à mão pelo menu "... › Agendar mensagem".' : '') +
         (lb.pulados.length ? ' (Pulados por já ter passado: ' + lb.pulados.join(', ') + '.)' : '');
-      window._ultima = { label: r.label, meet: r.meetLink, nome: $('nome').value.trim(), rotulo: r.rotulo || 'Reunião', presencial: !!r.presencial };
+      window._ultima = { label: r.label, meet: r.meetLink, nome: $('nome').value.trim(), rotulo: r.rotulo || 'Reunião', presencial: !!r.presencial, grupo: !!r.grupo, email: r.email || '' };
       toast((r.rotulo || 'Reunião') + ' marcada: ' + r.label);
       pedido = null; carregarDias(); // v1.5: o "já tem N" passa a contar esta marcação
-    }).catch(function (e) { btn.disabled = false; btn.textContent = 'Marcar e enviar convite'; estado('Falha: ' + e, 'erro'); });
+    }).catch(function (e) { desconferir(); estado('Falha: ' + e, 'erro'); });
   });
 
   $('copiar').addEventListener('click', function () {
     var u = window._ultima || {};
-    var primeiro = (u.nome || '').split(' ')[0];
+    var primeiro = u.grupo ? '' : (u.nome || '').split(' ')[0];   // v1.6: grupo sem vocativo
+    var abre = primeiro ? 'Perfeito, ' + primeiro + '!' : 'Perfeito!';
     var txt = u.presencial
-      ? 'Perfeito, ' + primeiro + '! Sua ' + u.rotulo + ' ficou marcada para ' + u.label + ' (horário de Brasília), no nosso escritório em Belo Horizonte. ' +
-        'O convite foi enviado para o seu e-mail. Qualquer imprevisto, é só me avisar por aqui.'
-      : 'Perfeito, ' + primeiro + '! Sua ' + u.rotulo + ' ficou marcada para ' + u.label + ' (horário de Brasília). ' +
+      ? abre + ' Sua ' + u.rotulo + ' ficou marcada para ' + u.label + ' (horário de Brasília), no nosso escritório em Belo Horizonte. ' +
+        (u.email ? 'O convite foi enviado para o seu e-mail. ' : '') + 'Qualquer imprevisto, é só me avisar por aqui.'
+      : abre + ' Sua ' + u.rotulo + ' ficou marcada para ' + u.label + ' (horário de Brasília). ' +
         'O convite com o link do Google Meet foi enviado para o seu e-mail' + (u.meet ? '. Link direto: ' + u.meet : '.') +
         ' Qualquer imprevisto, é só me avisar por aqui.';
     navigator.clipboard.writeText(txt).then(function () { toast('Mensagem copiada — cole na conversa'); }, function () { prompt('Copie a mensagem:', txt); });

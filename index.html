@@ -37,7 +37,7 @@
   <div id="remarcarBox" class="hid">
     <label>Reunião a remarcar</label>
     <select id="evento"></select>
-    <small id="eventoinfo">Só aparecem reuniões marcadas por este plugin nesta conversa (de 7 dias atrás em diante). O convite atualizado vai para o lead e os lembretes da conversa são refeitos.</small>
+    <small id="eventoinfo">Só aparecem reuniões marcadas por este plugin nesta conversa ou pela Ísis com este telefone (de 7 dias atrás em diante). O convite atualizado vai para o lead e os lembretes da conversa são refeitos.</small>
   </div>
   <div id="camposNova">
   <label>Tipo de reunião</label>
@@ -116,11 +116,11 @@
     if (!ctx.conversationId) { $('evento').innerHTML = '<option value="">abra uma conversa</option>'; return; }
     $('evento').innerHTML = '<option value="">procurando…</option>';
     var pedidoConv = ctx.conversationId;
-    chamar({ action: 'plugin_eventos', conversationId: ctx.conversationId }).then(function (r) {
+    chamar({ action: 'plugin_eventos', conversationId: ctx.conversationId, contactId: ctx.contactId, isGroup: !!ctx.grupo }).then(function (r) {   // v1.8: contato acha a reunião da Ísis quando o lead vem como @lid
       if (pedidoConv !== ctx.conversationId) return;   // trocou de conversa no meio: ignora a resposta velha
       if (!r.ok) { $('evento').innerHTML = '<option value="">' + 'erro ao procurar' + '</option>'; estado(r.error || 'erro ao procurar a reunião', 'erro'); return; }
       var evs = r.eventos || [];
-      if (!evs.length) { $('evento').innerHTML = '<option value="">nenhuma reunião do plugin nesta conversa</option>'; return; }
+      if (!evs.length) { $('evento').innerHTML = '<option value="">nenhuma reunião do plugin ou da Ísis nesta conversa</option>'; return; }
       $('evento').innerHTML = '';
       evs.forEach(function (e) { var o = document.createElement('option'); o.value = e.id; o.textContent = e.label + (e.passou ? ' (já passou)' : '') + ' · ' + e.titulo; $('evento').appendChild(o); });
       // pré-seleciona a próxima que ainda não passou; senão a mais recente
@@ -275,7 +275,7 @@
   // v1.7 23/10 — REMARCAR: 1º toque confere (de → para, por extenso); 2º toque atualiza o evento e refaz os lembretes
   function remarcar(slot, btn) {
     var evId = $('evento').value;
-    if (!evId) { estado('Escolha a reunião a remarcar (nenhuma reunião do plugin nesta conversa?).', 'erro'); return; }
+    if (!evId) { estado('Escolha a reunião a remarcar (nenhuma reunião do plugin ou da Ísis nesta conversa?).', 'erro'); return; }
     var evTxt = $('evento').options[$('evento').selectedIndex].textContent;
     if (!conferido) {
       var date = diaBRT(Date.parse(slot)), rel = relativo(date);

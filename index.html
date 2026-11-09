@@ -22,6 +22,16 @@
   small{color:var(--cinza)}
   #copiar{margin-top:6px}
   .hid{display:none}
+  /* v2.1 09/11 (Daniel ~19h4x: "eu preciso que seja um modal ... onde ela marca o responsável"): passo de escolha do responsável */
+  .modal{position:fixed;inset:0;background:rgba(18,49,79,.45);display:flex;align-items:center;justify-content:center;padding:12px;z-index:10}
+  .modal.hid{display:none}
+  .modal .caixa{background:#fff;border-radius:10px;padding:14px;width:100%;max-width:360px;box-shadow:0 8px 28px rgba(0,0,0,.25)}
+  .modal h2{font-size:14px;margin:0 0 6px}
+  .escolhas{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 6px}
+  .escolhas button{margin-top:0;padding:14px 8px;background:#fff;color:var(--azul);font-size:14px}
+  .escolhas button.sug{background:var(--azul);color:#fff}
+  .escolhas .cor{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .escolhas .nota{display:block;font-size:10px;font-weight:400;opacity:.85;min-height:13px;margin-top:2px}
 </style>
 </head>
 <body>
@@ -46,6 +56,12 @@
     <option value="O">Operacional (cliente · jurídico)</option>
     <option value="P">Presencial (lead no escritório)</option>
   </select>
+  <div id="respBox">
+  <label>Responsável pela reunião <b style="color:#b91c1c">*</b></label>
+  <input type="hidden" id="resp" value="">
+  <small id="respdica"></small>
+  <small id="respregra" class="hid">Dr. Daniel: guarda ou convivência em disputa, violência, divórcio ou união estável com partilha, troca de advogado, herança, indicação de parceiro e caso complexo. Izabéla: pensão sem disputa de guarda (mesmo com os filhos morando com a pessoa) e o resto.</small>
+  </div>
   <label>Nome</label>
   <input id="nome" required>
   <div class="row">
@@ -65,14 +81,30 @@
   <div id="confere" class="msg info hid"></div>
   <button id="btn" type="submit">Conferir e marcar</button>
   <button id="voltar" class="sec hid" type="button">Voltar e mudar</button>
-  <small>Todos os tipos convidam o lead, o daniel@ e o comercial@. Alinhamento e Presencial: o card vai para "Reunião Agendada". Operacional: avisa o jurídico no Discord. Presencial não gera Meet. Lembretes automáticos na conversa (3 toques): outro dia → véspera 17h, 8h30 do dia e link 10 min antes; mesmo dia → resumo logo após marcar, 2h antes e link 10 min antes; presencial → 1h antes com o endereço no lugar do link.</small>
+  <small>Todos os tipos convidam o lead, o daniel@ e o comercial@. Alinhamento e Presencial: o responsável vai na descrição do evento, no aviso do #agendamentos (com @ só para essa pessoa) e na tag resp-… da conversa; o card vai para "Reunião Agendada". Operacional: avisa o jurídico no Discord. Presencial não gera Meet. Lembretes automáticos na conversa (3 toques): outro dia → véspera 17h, 8h30 do dia e link 10 min antes; mesmo dia → resumo logo após marcar, 2h antes e link 10 min antes; presencial → 1h antes com o endereço no lugar do link.</small>
 </form>
+
+<!-- v2.1 09/11: passo de ESCOLHA do responsável (abre no "Conferir e marcar" de Alinhamento e Presencial; sem escolher, não marca) -->
+<div id="respModal" class="modal hid" role="dialog" aria-modal="true" aria-labelledby="respModalTit">
+  <div class="caixa">
+    <h2 id="respModalTit" tabindex="-1" style="outline:none">Para quem é esta reunião?</h2>
+    <small id="respModalDica"></small>
+    <div class="escolhas">
+      <button type="button" class="esc" data-resp="daniel"><span class="cor" style="background:#0b8043"></span>Dr. Daniel<span class="nota"></span></button>
+      <button type="button" class="esc" data-resp="izabela"><span class="cor" style="background:#f4511e"></span>Izabéla<span class="nota"></span></button>
+    </div>
+    <small>Dr. Daniel: guarda ou convivência em disputa, violência, divórcio ou união estável com partilha, troca de advogado, herança, indicação de parceiro e caso complexo. Izabéla: pensão sem disputa de guarda (mesmo com os filhos morando com a pessoa) e o resto. A cor é a do evento na agenda.</small>
+    <button type="button" id="respModalVoltar" class="sec">Voltar</button>
+  </div>
+</div>
 
 <div id="resultado" class="hid">
   <div class="msg ok" id="okmsg"></div>
   <div class="meet"><a id="meetlink" target="_blank" rel="noopener"></a></div>
   <button id="copiar" class="sec" type="button">Copiar mensagem para o lead</button>
+  <button id="remarcarEsta" class="sec hid" type="button">Errou o dia ou a hora? Remarcar esta reunião</button>
   <button id="outra" class="sec" type="button">Marcar outra</button>
+  <div id="respmsg" class="msg info hid"></div>
   <div id="cardmsg" class="msg info"></div>
   <div id="lembmsg" class="msg info"></div>
 </div>
@@ -83,7 +115,55 @@
 
   var q = new URLSearchParams(location.search);
   var ctx = { token: q.get('token') || '', operator_id: q.get('operator_id') || '', auth_secret: q.get('auth_secret') || '',
-              contactId: '', conversationId: '', sessionId: '', operatorName: '', grupo: false };
+              contactId: '', conversationId: '', sessionId: '', operatorName: '', grupo: false, tags: [] };
+
+  // v2.0 10/11/2026 — RESPONSÁVEL da reunião (exceção do Daniel 09/11 17:05:14 "sim aos 4"; regra fina 17:08:48).
+  // Ids gerados por isis-motor/responsavel-reuniao-2026-11-09/mapa-tags-resp.py (tags vivas do Kinbox; parceiros do mapa_tags.py verificado).
+  // A sugestão é só sugestão: quem marca confirma ou troca. A tag resp-… quem põe é o próprio Kinbox (postMessage "add-tag").
+  var TAG_RESP = { daniel: 62125, izabela: 62126 };
+  var TAGS_DANIEL = { 57334: 'area-divorcio', 57335: 'area-guarda (confira se há disputa)', 57336: 'area-protecao', 57337: 'area-heranca',
+    57338: 'area-uniao-estavel (confira se há partilha)', 57340: 'area-multipla', 52007: 'Indicação', 50273: 'Indicação Mayara', 52174: 'Safe&lima' };
+  var TAGS_PARCEIRO = [44062, 45524, 45525, 45527, 45528, 45530, 45532, 45535, 45536, 45537, 45545, 45698, 46167, 47524, 47914, 48057, 49568, 49764, 53296, 54362, 54784, 54890];
+  var TAGS_EQUIPE = { 57333: 'area-pensao', 57339: 'area-paternidade' };
+  var ROT_RESP = { daniel: 'Dr. Daniel', izabela: 'Izabéla' };
+  var ultimaMarcada = null;   // v2.0: {id, conv, label, titulo} da reunião que esta tela acabou de marcar (botão "Errou? Remarcar esta")
+  function sugerirResp(tags) {
+    var t = (tags || []).map(String), i;
+    for (i = 0; i < t.length; i++) if (TAGS_DANIEL[t[i]]) return { k: 'daniel', porque: 'tag ' + TAGS_DANIEL[t[i]] };
+    for (i = 0; i < t.length; i++) if (TAGS_PARCEIRO.indexOf(+t[i]) >= 0) return { k: 'daniel', porque: 'tag de parceiro (indicação)' };
+    if (t.indexOf(String(TAG_RESP.daniel)) >= 0) return { k: 'daniel', porque: 'a conversa já tem a tag resp-daniel' };
+    if (t.indexOf(String(TAG_RESP.izabela)) >= 0) return { k: 'izabela', porque: 'a conversa já tem a tag resp-izabela' };
+    for (i = 0; i < t.length; i++) if (TAGS_EQUIPE[t[i]]) return { k: 'izabela', porque: 'tag ' + TAGS_EQUIPE[t[i]] };
+    return null;
+  }
+  function aplicarSugestao() {
+    var s = sugerirResp(ctx.tags);
+    if (s && !$('resp').value) $('resp').value = s.k;
+    $('respdica').textContent = (s ? 'Sugestão pelas tags da conversa: ' + ROT_RESP[s.k] + ' (' + s.porque + ').' : 'Sem tag de tema na conversa.') +
+      ' Você escolhe (ou confirma) ao clicar em "Conferir e marcar".';
+  }
+  // v2.1 09/11 (Daniel ~19h4x): o responsável é um PASSO de escolha (janela com dois botões), não lista nem texto livre.
+  // Abre em todo "Conferir e marcar" de Alinhamento/Presencial; a sugestão pelas tags vem destacada; a pessoa confirma ou troca.
+  var respConfirmado = false;
+  function abrirRespModal() {
+    var atual = $('resp').value, s = sugerirResp(ctx.tags);
+    $('respModalDica').textContent = s ? 'Sugestão pelas tags da conversa: ' + ROT_RESP[s.k] + ' (' + s.porque + '). Confirme ou troque.' : 'Sem tag de tema na conversa: escolha pelo caso.';
+    Array.prototype.forEach.call(document.querySelectorAll('#respModal .esc'), function (b) {
+      var k = b.getAttribute('data-resp'), on = k === atual;
+      b.classList.toggle('sug', on);
+      b.querySelector('.nota').textContent = on ? (s && s.k === k ? 'sugerido pelas tags' : 'escolhido') : '';
+    });
+    $('respModal').classList.remove('hid');
+    // revisor 09/11: sem sugestão, o foco vai para o título (um Enter solto não escolhe ninguém)
+    var foco = document.querySelector('#respModal .esc.sug') || $('respModalTit');
+    try { foco.focus(); } catch (_) {}
+  }
+  function fecharRespModal() { $('respModal').classList.add('hid'); }
+  // operacional não tem responsável (é do jurídico); no Remarcar o responsável fica o da marcação
+  function ajustarResp() {
+    var sem = $('tipo').value === 'O' || remarcando();
+    $('respBox').classList.toggle('hid', sem); $('resp').required = !sem;
+  }
   var slotsCache = {};
 
   var $ = function (id) { return document.getElementById(id); };
@@ -99,7 +179,8 @@
   }
   // v1.6 21/10 — trocou de conversa: ZERA o formulário (antes o nome/telefone/e-mail do lead anterior ficavam e iam para o novo)
   function zerar() {
-    ['nome', 'tel', 'email', 'tema'].forEach(function (id) { $(id).value = ''; });
+    ['nome', 'tel', 'email', 'tema', 'resp'].forEach(function (id) { $(id).value = ''; });
+    $('respdica').textContent = ''; fecharRespModal();   // v2.1: trocou de conversa com a janela do responsável aberta → fecha
     $('tipo').value = 'A'; $('acao').value = 'nova'; $('evento').innerHTML = ''; ajustarAcao(); desconferir();
     $('resultado').classList.add('hid'); $('f').classList.remove('hid');
   }
@@ -109,7 +190,7 @@
     var r = remarcando();
     $('remarcarBox').classList.toggle('hid', !r); $('camposNova').classList.toggle('hid', r); $('camposTema').classList.toggle('hid', r);
     $('nome').required = !r;   // campos escondidos não podem travar o envio
-    ajustarEmail();
+    ajustarEmail(); ajustarResp();
     if (r) { $('email').required = false; carregarEventos(); }
   }
   function carregarEventos() {
@@ -118,13 +199,16 @@
     var pedidoConv = ctx.conversationId;
     chamar({ action: 'plugin_eventos', conversationId: ctx.conversationId, contactId: ctx.contactId, isGroup: !!ctx.grupo }).then(function (r) {   // v1.8: contato acha a reunião da Ísis quando o lead vem como @lid
       if (pedidoConv !== ctx.conversationId) return;   // trocou de conversa no meio: ignora a resposta velha
-      if (!r.ok) { $('evento').innerHTML = '<option value="">' + 'erro ao procurar' + '</option>'; estado(r.error || 'erro ao procurar a reunião', 'erro'); return; }
-      var evs = r.eventos || [];
+      var evs = (r && r.eventos) || [];
+      // v2.0: a reunião que esta tela acabou de marcar nesta conversa entra na lista mesmo que a busca da agenda ainda não a enxergue
+      var um = ultimaMarcada && String(ultimaMarcada.conv) === String(pedidoConv) ? ultimaMarcada : null;
+      if (um && !evs.some(function (e) { return e.id === um.id; })) evs = evs.concat([{ id: um.id, label: um.label, titulo: um.titulo, passou: false }]);
+      if (!r.ok && !evs.length) { $('evento').innerHTML = '<option value="">' + 'erro ao procurar' + '</option>'; estado(r.error || 'erro ao procurar a reunião', 'erro'); return; }
       if (!evs.length) { $('evento').innerHTML = '<option value="">nenhuma reunião do plugin ou da Ísis nesta conversa</option>'; return; }
       $('evento').innerHTML = '';
       evs.forEach(function (e) { var o = document.createElement('option'); o.value = e.id; o.textContent = e.label + (e.passou ? ' (já passou)' : '') + ' · ' + e.titulo; $('evento').appendChild(o); });
-      // pré-seleciona a próxima que ainda não passou; senão a mais recente
-      var prox = evs.filter(function (e) { return !e.passou; })[0] || evs[evs.length - 1];
+      // pré-seleciona a que esta tela acabou de marcar; senão a próxima que ainda não passou; senão a mais recente
+      var prox = (um && evs.filter(function (e) { return e.id === um.id; })[0]) || evs.filter(function (e) { return !e.passou; })[0] || evs[evs.length - 1];
       $('evento').value = prox.id;
     }).catch(function (e) { $('evento').innerHTML = '<option value="">sem resposta</option>'; estado('Sem resposta do braço da agenda: ' + e, 'erro'); });
   }
@@ -137,6 +221,9 @@
       if (novaConv) zerar();
       ctx.contactId = c.id || ''; ctx.conversationId = conv.id || ''; ctx.sessionId = s.id || ''; ctx.operatorName = u.name || '';
       ctx.grupo = ehGrupo(c, conv);
+      // v2.0: o Kinbox manda as tags da conversa como [{id}] (BasicLayoutAuth, 09/11): base da sugestão do responsável
+      ctx.tags = (conv.tags || []).map(function (t) { return String(t && t.id != null ? t.id : t); });
+      aplicarSugestao();
       $('grupomsg').classList.toggle('hid', !ctx.grupo);
       if (!$('nome').value) $('nome').value = c.name || '';
       if (!$('tel').value && !ctx.grupo) $('tel').value = c.phone || '';   // grupo: não traz o id do grupo como telefone
@@ -211,16 +298,27 @@
   }
   var conferido = false;
   function desconferir() {
-    conferido = false; $('confere').classList.add('hid'); $('voltar').classList.add('hid');
+    conferido = false; respConfirmado = false; $('confere').classList.add('hid'); $('voltar').classList.add('hid');
     var btn = $('btn'); btn.disabled = false; btn.textContent = 'Conferir e marcar';
   }
-  ['tipo', 'nome', 'tel', 'email', 'dia', 'hora', 'tema', 'acao', 'evento'].forEach(function (id) {
+  ['tipo', 'nome', 'tel', 'email', 'dia', 'hora', 'tema', 'acao', 'evento', 'resp'].forEach(function (id) {
     $(id).addEventListener('change', desconferir); $(id).addEventListener('input', desconferir);
   });
   $('tipo').addEventListener('change', ajustarEmail);
+  $('tipo').addEventListener('change', ajustarResp);
   $('acao').addEventListener('change', ajustarAcao);
   $('voltar').addEventListener('click', desconferir);
-  ajustarEmail();
+  // v2.1: botões da janela do responsável
+  Array.prototype.forEach.call(document.querySelectorAll('#respModal .esc'), function (b) {
+    b.addEventListener('click', function () {
+      $('resp').value = b.getAttribute('data-resp'); respConfirmado = true; fecharRespModal();
+      $('respdica').textContent = 'Escolhido: ' + ROT_RESP[$('resp').value] + '. Para trocar, clique em "Voltar e mudar".';
+      if ($('f').requestSubmit) $('f').requestSubmit(); else $('btn').click();   // segue para a conferência
+    });
+  });
+  $('respModalVoltar').addEventListener('click', fecharRespModal);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') fecharRespModal(); });
+  ajustarEmail(); ajustarResp();
 
   $('dia').addEventListener('change', function () {
     var date = this.value;
@@ -234,6 +332,9 @@
     var slot = $('hora').value; if (!slot || isNaN(Date.parse(slot))) { estado('Escolha um horário (a lista ainda pode estar carregando).', 'erro'); return; }
     var btn = $('btn');
     if (remarcando()) { remarcar(slot, btn); return; }
+    var comResp = $('tipo').value !== 'O', resp = comResp ? $('resp').value : '';
+    // v2.1: a escolha do responsável é um passo próprio (janela); sem ela, não segue
+    if (comResp && (!respConfirmado || !ROT_RESP[resp])) { abrirRespModal(); return; }
     // 1º toque: CONFERIR (data por extenso + hoje/amanhã); só o 2º toque grava
     if (!conferido) {
       // revisor 21/10: a data e a hora conferidas saem do PRÓPRIO horário escolhido (slotISO), não do campo "dia"
@@ -247,17 +348,35 @@
         extenso(date) + (rel ? ' (' + rel + ')' : '') + ', às ' + hhmm + ' (Brasília)',
         email ? 'Convite para ' + email : 'Sem e-mail (presencial): ninguém recebe convite além do escritório'
       ];
+      if (comResp) linhas.push('Responsável: ' + ROT_RESP[resp]);
       linhas.forEach(function (t, i) { var el = document.createElement(i === 2 ? 'b' : 'div'); el.textContent = t; $('confere').appendChild(el); if (i === 2) $('confere').appendChild(document.createElement('br')); });
       $('confere').classList.remove('hid'); $('voltar').classList.remove('hid');
       conferido = true; btn.textContent = 'Confirmar e marcar'; return;
     }
     btn.disabled = true; btn.textContent = 'Marcando…'; $('estado').classList.add('hid');
-    chamar({ action: 'plugin_book', tipo: $('tipo').value, slotISO: slot, name: $('nome').value.trim(), phone: $('tel').value.trim(), email: $('email').value.trim(),
-             tema: $('tema').value.trim(), contactId: ctx.contactId, conversationId: ctx.conversationId, operatorName: ctx.operatorName, isGroup: !!ctx.grupo })
+    var convMarcada = String(ctx.conversationId || '');
+    var corpo = { action: 'plugin_book', tipo: $('tipo').value, slotISO: slot, name: $('nome').value.trim(), phone: $('tel').value.trim(), email: $('email').value.trim(),
+             tema: $('tema').value.trim(), contactId: ctx.contactId, conversationId: ctx.conversationId, operatorName: ctx.operatorName, isGroup: !!ctx.grupo };
+    if (resp) corpo.responsavel = resp;   // v2.0
+    chamar(corpo)
     .then(function (r) {
       desconferir();
       if (!r.ok) { estado(r.error || 'não marcou', 'erro'); toast(r.error || 'Não marcou', 'error'); return; }
       $('f').classList.add('hid'); $('resultado').classList.remove('hid');
+      // v2.0: tag resp-… na conversa, pelo próprio Kinbox (só se a tela ainda está na conversa que marcou)
+      $('respmsg').classList.toggle('hid', !r.responsavel);
+      if (r.responsavel && TAG_RESP[r.responsavel]) {
+        var rot = ROT_RESP[r.responsavel], nomeTag = 'resp-' + r.responsavel;
+        if (String(ctx.conversationId || '') === convMarcada) {
+          try {
+            var outro = r.responsavel === 'daniel' ? 'izabela' : 'daniel';
+            if (ctx.tags.indexOf(String(TAG_RESP[outro])) >= 0) window.parent.postMessage({ event: 'remove-tag', data: TAG_RESP[outro] }, '*');
+            window.parent.postMessage({ event: 'add-tag', data: TAG_RESP[r.responsavel] }, '*');
+            ctx.tags = ctx.tags.filter(function (x) { return x !== String(TAG_RESP[outro]); }).concat([String(TAG_RESP[r.responsavel])]);
+            $('respmsg').textContent = '👤 Responsável: ' + rot + ' (no topo da descrição do evento, na cor da agenda e no #agendamentos). 🏷️ Tag ' + nomeTag + ' pedida ao Kinbox: confira se apareceu na conversa.';
+          } catch (e) { $('respmsg').textContent = '👤 Responsável: ' + rot + '. ⚠️ Não consegui pôr a tag ' + nomeTag + ': ponha à mão.'; }
+        } else $('respmsg').textContent = '👤 Responsável: ' + rot + '. ⚠️ A conversa mudou durante a marcação: ponha a tag ' + nomeTag + ' à mão na conversa da reunião.';
+      }
       $('okmsg').textContent = (r.rotulo || 'Reunião') + ' marcada: ' + r.label + '.' + (r.email ? ' Convite enviado para ' + r.email + '.' : ' Sem e-mail do lead: convite só para o escritório.');
       $('meetlink').textContent = r.presencial ? 'Presencial no escritório (sem Meet)' : (r.meetLink || r.htmlLink); $('meetlink').href = r.meetLink || r.htmlLink;
       var card = r.card || {};
@@ -267,6 +386,10 @@
         (lb.erros.length ? ' ⚠️ Falhou: ' + lb.erros.join(' · ') + ' — agende à mão pelo menu "... › Agendar mensagem".' : '') +
         (lb.pulados.length ? ' (Pulados por já ter passado: ' + lb.pulados.join(', ') + '.)' : '');
       window._ultima = { label: r.label, meet: r.meetLink, nome: $('nome').value.trim(), rotulo: r.rotulo || 'Reunião', presencial: !!r.presencial, grupo: !!r.grupo, email: r.email || '' };
+      // v2.0 (conserto do Remarcar, caso Isabel 09/11): logo depois de marcar errado, o caminho é REMARCAR esta (mantém o Meet e
+      // troca os lembretes), não marcar outra. O evento recém-criado vai direto para a lista, sem depender da busca da agenda.
+      ultimaMarcada = r.eventId ? { id: r.eventId, conv: convMarcada, label: r.label, titulo: (r.rotulo || 'Reunião') + ' (' + $('nome').value.trim() + ')' } : null;
+      $('remarcarEsta').classList.toggle('hid', !ultimaMarcada);
       toast((r.rotulo || 'Reunião') + ' marcada: ' + r.label);
       pedido = null; carregarDias(); // v1.5: o "já tem N" passa a contar esta marcação
     }).catch(function (e) { desconferir(); estado('Falha: ' + e, 'erro'); });
@@ -311,6 +434,7 @@
         (lb.erros.length ? ' ⚠️ Falhou: ' + lb.erros.join(' · ') + '.' : '') +
         (lb.pulados.length ? ' (Pulados por já ter passado: ' + lb.pulados.join(', ') + '.)' : '');
       window._ultima = { label: r.label, meet: r.meetLink, nome: '', rotulo: r.rotulo || 'Reunião', presencial: !!r.presencial, grupo: true, email: r.temEmail === false ? '' : 'x', remarcada: true };
+      $('remarcarEsta').classList.add('hid');
       toast((r.rotulo || 'Reunião') + ' remarcada: ' + r.label);
       pedido = null; carregarDias();
     }).catch(function (e) { desconferir(); estado('Falha: ' + e, 'erro'); });
@@ -331,6 +455,11 @@
   $('outra').addEventListener('click', function () {
     $('resultado').classList.add('hid'); $('f').classList.remove('hid');
     if (remarcando()) { $('acao').value = 'nova'; ajustarAcao(); }   // revisor 23/10 (R6): depois de remarcar, volta para "marcar nova"
+  });
+  // v2.0: "Errou o dia ou a hora?" -> Remarcar com a reunião que acabou de ser marcada já escolhida
+  $('remarcarEsta').addEventListener('click', function () {
+    $('resultado').classList.add('hid'); $('f').classList.remove('hid');
+    $('acao').value = 'remarcar'; ajustarAcao(); desconferir();
   });
 
   if (!ctx.token) estado('Esta tela só funciona dentro do Kinbox (plugin da conversa).', 'erro');
